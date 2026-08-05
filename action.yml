@@ -26,7 +26,7 @@ inputs:
   cloudflared-version:
     description: Pinned cloudflared version
     required: false
-    default: "2026.5.1"
+    default: "2026.7.3"
   connect-timeout:
     description: SSH connection timeout in seconds
     required: false
@@ -110,6 +110,18 @@ runs:
         printf '%s\n' "$SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
         chmod 600 "$ssh_dir/id_deploy" "$ssh_dir/known_hosts"
 
+        cat > "$ssh_dir/proxy.sh" <<'EOF_PROXY'
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        exec "$RUNNER_TEMP/cloudflared" access ssh \
+          --hostname "$1" \
+          --id "$CF_ACCESS_CLIENT_ID" \
+          --secret "$CF_ACCESS_CLIENT_SECRET"
+        EOF_PROXY
+
+        chmod 700 "$ssh_dir/proxy.sh"
+
         cat > "$ssh_dir/config" <<EOF_CONFIG
         Host cloudflare-remote
           HostName ${SSH_HOST}
@@ -120,7 +132,7 @@ runs:
           ConnectTimeout ${CONNECT_TIMEOUT}
           StrictHostKeyChecking yes
           UserKnownHostsFile ${ssh_dir}/known_hosts
-          ProxyCommand ${RUNNER_TEMP}/cloudflared access ssh --hostname %h
+          ProxyCommand ${ssh_dir}/proxy.sh %h
         EOF_CONFIG
 
         chmod 600 "$ssh_dir/config"
@@ -128,8 +140,8 @@ runs:
     - name: Run remote command
       shell: bash
       env:
-        TUNNEL_SERVICE_TOKEN_ID: ${{ inputs.service-token-id }}
-        TUNNEL_SERVICE_TOKEN_SECRET: ${{ inputs.service-token-secret }}
+        CF_ACCESS_CLIENT_ID: ${{ inputs.service-token-id }}
+        CF_ACCESS_CLIENT_SECRET: ${{ inputs.service-token-secret }}
         REMOTE_COMMAND: ${{ inputs.command }}
       run: |
         set -euo pipefail
