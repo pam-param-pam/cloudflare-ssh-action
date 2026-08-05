@@ -118,7 +118,8 @@ runs:
           --hostname "$1" \
           --id "$CF_ACCESS_CLIENT_ID" \
           --secret "$CF_ACCESS_CLIENT_SECRET" \
-          --loglevel debug
+          --log-level debug
+          --logfile /dev/stderr
         EOF_PROXY
 
         chmod 700 "$ssh_dir/proxy.sh"
