@@ -113,11 +113,12 @@ runs:
         cat > "$ssh_dir/proxy.sh" <<'EOF_PROXY'
         #!/usr/bin/env bash
         set -euo pipefail
-
+        
         exec "$RUNNER_TEMP/cloudflared" access ssh \
           --hostname "$1" \
           --id "$CF_ACCESS_CLIENT_ID" \
-          --secret "$CF_ACCESS_CLIENT_SECRET"
+          --secret "$CF_ACCESS_CLIENT_SECRET" \
+          --loglevel debug
         EOF_PROXY
 
         chmod 700 "$ssh_dir/proxy.sh"
