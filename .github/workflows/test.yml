@@ -1,0 +1,35 @@
+name: Test Cloudflare SSH Action
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout action
+        uses: actions/checkout@v4
+
+      - name: Test SSH connection
+        uses: ./
+        with:
+          host: ${{ secrets.CI_DEPLOYMENT_HOST }}
+          username: ${{ secrets.CI_RPI_USERNAME }}
+          private-key: ${{ secrets.CI_RPI_SSH_KEY }}
+          known-hosts: ${{ secrets.CI_RPI_SSH_KNOWN_HOSTS }}
+          service-token-id: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          service-token-secret: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          cloudflared-version: "2026.5.1"
+          command: |
+            set -e
+            echo "Cloudflare SSH action test successful"
+            hostname
+            whoami
+            pwd
+            date
