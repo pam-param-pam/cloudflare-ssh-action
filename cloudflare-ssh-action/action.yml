@@ -1,0 +1,107 @@
+name: Cloudflare SSH
+description: Run a command over SSH through Cloudflare Access and Cloudflare Tunnel.
+
+inputs:
+  host:
+    description: Cloudflare Access hostname, for example ssh.example.com
+    required: true
+  username:
+    description: Remote SSH username
+    required: true
+  private-key:
+    description: SSH private key used by the remote SSH server
+    required: true
+  known-hosts:
+    description: Trusted known_hosts entry for the SSH server
+    required: true
+  service-token-id:
+    description: Cloudflare Access service-token client ID
+    required: true
+  service-token-secret:
+    description: Cloudflare Access service-token client secret
+    required: true
+  command:
+    description: Command to execute on the remote host
+    required: true
+  cloudflared-version:
+    description: Pinned cloudflared version
+    required: false
+    default: "2026.7.3"
+  connect-timeout:
+    description: SSH connection timeout in seconds
+    required: false
+    default: "30"
+
+runs:
+  using: composite
+  steps:
+    - name: Validate runner
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ "${RUNNER_OS}" != "Linux" ]; then
+          echo "Cloudflare SSH supports Linux runners only." >&2
+          exit 1
+        fi
+
+    - name: Install cloudflared
+      shell: bash
+      env:
+        CLOUDFLARED_VERSION: ${{ inputs.cloudflared-version }}
+      run: |
+        set -euo pipefail
+        case "$(uname -m)" in
+          x86_64) asset="cloudflared-linux-amd64" ;;
+          aarch64|arm64) asset="cloudflared-linux-arm64" ;;
+          *) echo "Unsupported runner architecture: $(uname -m)" >&2; exit 1 ;;
+        esac
+        url="https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/${asset}"
+        curl --fail --location --silent --show-error "$url" --output "$RUNNER_TEMP/cloudflared"
+        chmod 700 "$RUNNER_TEMP/cloudflared"
+        "$RUNNER_TEMP/cloudflared" --version
+
+    - name: Configure SSH
+      shell: bash
+      env:
+        SSH_HOST: ${{ inputs.host }}
+        SSH_USERNAME: ${{ inputs.username }}
+        SSH_PRIVATE_KEY: ${{ inputs.private-key }}
+        SSH_KNOWN_HOSTS: ${{ inputs.known-hosts }}
+        CONNECT_TIMEOUT: ${{ inputs.connect-timeout }}
+      run: |
+        set -euo pipefail
+        ssh_dir="$RUNNER_TEMP/cloudflare-ssh"
+        install -m 700 -d "$ssh_dir"
+        printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/id_deploy"
+        printf '%s\n' "$SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+        chmod 600 "$ssh_dir/id_deploy" "$ssh_dir/known_hosts"
+        cat > "$ssh_dir/config" <<EOF_CONFIG
+        Host cloudflare-remote
+          HostName ${SSH_HOST}
+          User ${SSH_USERNAME}
+          IdentityFile ${ssh_dir}/id_deploy
+          IdentitiesOnly yes
+          BatchMode yes
+          ConnectTimeout ${CONNECT_TIMEOUT}
+          StrictHostKeyChecking yes
+          UserKnownHostsFile ${ssh_dir}/known_hosts
+          ProxyCommand ${RUNNER_TEMP}/cloudflared access ssh --hostname %h --service-token-id \${CF_ACCESS_CLIENT_ID} --service-token-secret \${CF_ACCESS_CLIENT_SECRET}
+        EOF_CONFIG
+        chmod 600 "$ssh_dir/config"
+
+    - name: Run remote command
+      shell: bash
+      env:
+        CF_ACCESS_CLIENT_ID: ${{ inputs.service-token-id }}
+        CF_ACCESS_CLIENT_SECRET: ${{ inputs.service-token-secret }}
+        REMOTE_COMMAND: ${{ inputs.command }}
+      run: |
+        set -euo pipefail
+        ssh -F "$RUNNER_TEMP/cloudflare-ssh/config" cloudflare-remote "$REMOTE_COMMAND"
+
+    - name: Cleanup
+      if: always()
+      shell: bash
+      run: |
+        rm -rf "$RUNNER_TEMP/cloudflare-ssh"
+        rm -f "$RUNNER_TEMP/cloudflared"
